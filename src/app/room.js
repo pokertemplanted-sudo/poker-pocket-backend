@@ -727,7 +727,7 @@ Room.prototype.playerFold = function (connection_id, socketKey) {
   let playerId = this.getPlayerId(connection_id);
   if (this.players[playerId] !== undefined) {
     if (this.players[playerId].connection != null && this.players[playerId].socketKey === socketKey || this.players[playerId].isBot) {
-      if (playerId !== -1) {
+      if (playerId !== -1 && playerId === this.current_player_turn) {
         if (!this.smallBlindGiven || !this.bigBlindGiven) {
           let blind_amount = 0;
           if (!this.smallBlindGiven && !this.bigBlindGiven) {
@@ -760,7 +760,7 @@ Room.prototype.playerFold = function (connection_id, socketKey) {
 Room.prototype.playerCheck = function (connection_id, socketKey) {
   let playerId = this.getPlayerId(connection_id);
   if (this.players[playerId].connection != null && this.players[playerId].socketKey === socketKey || this.players[playerId].isBot) {
-    if (playerId !== -1) {
+    if (playerId !== -1 && playerId === this.current_player_turn) {
       let check_amount = 0;
       if (this.isCallSituation || this.totalPot === 0 || !this.smallBlindGiven || !this.bigBlindGiven) {
         if (this.smallBlindGiven && this.bigBlindGiven) {
@@ -805,7 +805,7 @@ Room.prototype.playerCheck = function (connection_id, socketKey) {
 Room.prototype.playerRaise = function (connection_id, socketKey, amount) {
   let playerId = this.getPlayerId(connection_id);
   if (this.players[playerId].connection !== null && this.players[playerId].socketKey === socketKey || this.players[playerId].isBot) {
-    if (playerId !== -1) {
+    if (playerId !== -1 && playerId === this.current_player_turn) {
       let playerBetDifference = (this.currentHighestBet - this.players[playerId].totalBet);
       if (amount === 0) {
         amount = playerBetDifference;
