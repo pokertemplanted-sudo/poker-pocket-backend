@@ -21,6 +21,7 @@ function Player(conn, socketKey, connection_id, player_money, isBot) {
   this.playerCards = [];
   this.playerState = Player.PLAYER_STATE_NON;
   this.totalBet = 0;
+  this.handTotalBet = 0; // Cumulative contribution across ALL streets of current hand, used for side pot calculation. Reset only on resetParams() (new hand), NOT when a street's bets are collected to totalPot.
   this.isDealer = false;
   this.isPlayerTurn = false;
   this.playerTimeLeft = 0;
@@ -38,6 +39,7 @@ exports.Player = Player;
 Player.prototype.resetParams = function () {
   this.playerCards = [];
   this.totalBet = 0;
+  this.handTotalBet = 0;
   this.isPlayerTurn = false;
   this.playerTimeLeft = 0;
   this.isFold = false;

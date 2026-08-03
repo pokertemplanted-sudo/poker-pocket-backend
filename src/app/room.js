@@ -518,9 +518,7 @@ Room.prototype.sendAllPlayersCards = function () {
 Room.prototype.roundResultsEnd = function () {
   const _this = this;
   logger.log('--------ROUND RESULT-----------');
-  let winnerPlayers = [];
 
-  let currentHighestRank = 0;
   let l = this.players.length;
   for (let i = 0; i < l; i++) {
     if (!this.players[i].isFold) {
@@ -537,31 +535,57 @@ Room.prototype.roundResultsEnd = function () {
       // Log out results
       logger.log(this.players[i].playerName + ' has ' + this.players[i].handName + ' with value: ' + this.players[i].handValue
         + ' cards involved: ' + hand.cards, logger.LOG_GREEN);
-      // Calculate winner(s)
-      if (this.players[i].handValue > currentHighestRank) {
-        currentHighestRank = this.players[i].handValue;
-        winnerPlayers = []; // zero it
-        winnerPlayers.push(i);
-      } else if (this.players[i].handValue === currentHighestRank) {
-        winnerPlayers.push(i);
+    }
+  }
+
+  // Split the hand into main pot + side pots (based on each player's actual
+  // contribution) instead of handing the whole totalPot to the overall best hand.
+  // This is what makes all-ins with uneven stacks pay out correctly.
+  const pots = this.calculateSidePots();
+  const allWinnerIndexes = []; // for stats update, deduplicated
+  let winnerNames = [];
+  let topHandName = null;
+
+  for (let p = 0; p < pots.length; p++) {
+    const pot = pots[p];
+    if (pot.eligible.length === 0) {
+      continue; // Nobody left eligible for this layer (shouldn't normally happen)
+    }
+    let potHighestRank = 0;
+    let potWinners = [];
+    for (let e = 0; e < pot.eligible.length; e++) {
+      const idx = pot.eligible[e];
+      const value = this.players[idx].handValue;
+      if (value > potHighestRank) {
+        potHighestRank = value;
+        potWinners = [idx];
+      } else if (value === potHighestRank) {
+        potWinners.push(idx);
+      }
+    }
+    const share = Math.floor(pot.amount / potWinners.length);
+    let remainder = pot.amount - (share * potWinners.length); // odd chips, given to first winner to conserve money
+    for (let w = 0; w < potWinners.length; w++) {
+      const idx = potWinners[w];
+      let amount = share + (w === 0 ? remainder : 0);
+      this.players[idx].playerMoney = this.players[idx].playerMoney + amount;
+      if (allWinnerIndexes.indexOf(idx) === -1) {
+        allWinnerIndexes.push(idx);
+        winnerNames.push(this.players[idx].playerName);
+        this.roundWinnerPlayerIds.push(this.players[idx].playerId);
+        this.roundWinnerPlayerCards.push(utils.stringToAsciiCardsArray(this.players[idx].cardsInvolvedOnEvaluation));
+      }
+      if (topHandName === null || p === 0) { // Prefer describing the main pot's winning hand in the status text
+        topHandName = this.players[idx].handName;
       }
     }
   }
-  let winnerNames = [];
-  let sharedPot = (this.totalPot / winnerPlayers.length);
-  l = winnerPlayers.length;
-  for (let i = 0; i < l; i++) {
-    winnerNames.push(this.players[winnerPlayers[i]].playerName + (l > 1 ? '' : ''));
-    this.players[winnerPlayers[i]].playerMoney = this.players[winnerPlayers[i]].playerMoney + sharedPot;
-    this.roundWinnerPlayerIds.push(this.players[winnerPlayers[i]].playerId);
-    this.roundWinnerPlayerCards.push(utils.stringToAsciiCardsArray(this.players[winnerPlayers[i]].cardsInvolvedOnEvaluation));
-  }
-  logger.log('Room = ' + this.roomName + ' winner(s) are : ' + winnerNames);
-  this.currentStatusText = winnerNames + ' got ' + this.players[winnerPlayers[0]].handName;
 
+  logger.log('Room = ' + this.roomName + ' winner(s) are : ' + winnerNames + (pots.length > 1 ? ' (' + pots.length + ' pots)' : ''));
+  this.currentStatusText = winnerNames + ' got ' + topHandName;
 
-  this.updateLoggedInPlayerDatabaseStatistics(winnerPlayers, this.lastWinnerPlayers);
-  this.lastWinnerPlayers = winnerPlayers; // Take new reference of winner players
+  this.updateLoggedInPlayerDatabaseStatistics(allWinnerIndexes, this.lastWinnerPlayers);
+  this.lastWinnerPlayers = allWinnerIndexes; // Take new reference of winner players
   this.totalPot = 0;
   this.isResultsCall = true;
 
@@ -1117,6 +1141,7 @@ Room.prototype.collectChipsToPotAndSendAction = function () {
       boolMoneyToCollect = true;
     }
     this.totalPot = this.totalPot + this.players[u].totalBet; // Get round bet to total pot
+    this.players[u].handTotalBet = this.players[u].handTotalBet + this.players[u].totalBet; // Track full-hand contribution for side pot calculation
     this.players[u].totalBet = 0; // It's collected, we can empty players total bet
   }
   // Send animation action
@@ -1262,6 +1287,39 @@ Room.prototype.getNotRoundPlayedPlayer = function () {
 
 
 // Evaluate player hand
+// Splits the hand's total contributions into one or more pots (main pot + side pots).
+// Any player who put money in (folded or not) counts toward a pot's size, but only
+// players still in the hand (not folded) and who contributed at least that pot's
+// level are eligible to WIN that pot. This is what correctly handles all-ins where
+// players have different stack sizes, instead of one shared pot for everyone.
+Room.prototype.calculateSidePots = function () {
+  const contributors = [];
+  for (let i = 0; i < this.players.length; i++) {
+    if (this.players[i] != null && this.players[i].handTotalBet > 0) {
+      contributors.push(i);
+    }
+  }
+  if (contributors.length === 0) {
+    return [];
+  }
+  const levels = Array.from(new Set(contributors.map((i) => this.players[i].handTotalBet))).sort((a, b) => a - b);
+
+  const pots = [];
+  let prevLevel = 0;
+  for (let lv = 0; lv < levels.length; lv++) {
+    const level = levels[lv];
+    const layerContributors = contributors.filter((i) => this.players[i].handTotalBet >= level);
+    const layerAmount = (level - prevLevel) * layerContributors.length;
+    if (layerAmount > 0) {
+      const eligible = layerContributors.filter((i) => !this.players[i].isFold);
+      pots.push({amount: layerAmount, eligible: eligible});
+    }
+    prevLevel = level;
+  }
+  return pots;
+};
+
+
 Room.prototype.evaluatePlayerCards = function (current_player) {
   let cardsToEvaluate = [];
   let ml = this.middleCards.length;
