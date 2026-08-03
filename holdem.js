@@ -14,6 +14,19 @@ const serverUtils = require('./src/utils');
 const autoPlay = require('./src/app/autoPlay');
 const dbUtils = require('./src/database/dbUtils');
 
+// Safety net: an uncaught exception ANYWHERE (one room's synchronous logic,
+// a timer callback, a bot decision, etc.) used to crash the entire Node
+// process, disconnecting every player on every table -- not just the one
+// hand that hit the bug. Log it and keep the server up instead. This is a
+// backstop, not a substitute for fixing the underlying bug (see the
+// bettingRound recursion guard for a concrete example of doing both).
+process.on('uncaughtException', function (err) {
+  logger.log('UNCAUGHT EXCEPTION (server stayed up): ' + (err && err.stack ? err.stack : err), logger.LOG_RED);
+});
+process.on('unhandledRejection', function (reason) {
+  logger.log('UNHANDLED PROMISE REJECTION (server stayed up): ' + reason, logger.LOG_RED);
+});
+
 // Game objects
 const room = require('./src/app/room'); // Empty object of room
 const player = require('./src/app/player'); // Empty object of player

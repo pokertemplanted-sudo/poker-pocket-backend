@@ -630,8 +630,20 @@ Room.prototype.roundResultsMiddleOfTheGame = function () {
 // *********************************************************************************************************************
 /* Every betting round goes thru this logic */
 
-Room.prototype.bettingRound = function (current_player_turn) {
+Room.prototype.bettingRound = function (current_player_turn, recursionDepth) {
   let _this = this;
+  recursionDepth = (recursionDepth || 0) + 1;
+  // Defense in depth: bettingRound recurses synchronously by design, and a
+  // RangeError (stack overflow) anywhere in this function crashes the WHOLE
+  // Node process -- every player on every table gets disconnected, not just
+  // this room. A legitimate hand never needs anywhere close to this many
+  // recursive calls. If some future bug reintroduces a loop like this, fail
+  // this one hand instead of taking the entire server down with it.
+  if (recursionDepth > 500) {
+    logger.log('Room ' + this.roomName + ': bettingRound recursion guard tripped (possible infinite loop), aborting hand', logger.LOG_RED);
+    this.roundResultsMiddleOfTheGame();
+    return;
+  }
   if (this.getActivePlayers()) { // Checks that game has active players (not fold ones)
     let verifyBets = this.verifyPlayersBets(); // Active players have correct amount of money in game
     let noRoundPlayedPlayer = this.getNotRoundPlayedPlayer(); // Returns player position who has not played it's round
@@ -666,7 +678,7 @@ Room.prototype.bettingRound = function (current_player_turn) {
         }
       } else {
         this.isCallSituation = true;
-        this.bettingRound(verifyBets);
+        this.bettingRound(verifyBets, recursionDepth);
       }
 
     } else {
@@ -675,8 +687,19 @@ Room.prototype.bettingRound = function (current_player_turn) {
 
         // Forced small and big blinds case
         if (this.currentStage === Room.HOLDEM_STAGE_TWO_PRE_FLOP && (!this.smallBlindGiven || !this.bigBlindGiven)) {
+          // Keep the room's turn-ownership field in sync with the player we're
+          // about to force a blind out of -- playerCheck() requires
+          // playerId === this.current_player_turn (a security fix added to
+          // reject actions from a player whose turn it isn't), but this loop
+          // was calling playerCheck() using only the LOCAL current_player_turn
+          // parameter, never updating this.current_player_turn. That caused
+          // the guard to reject the (silent, self-triggered) big blind post,
+          // bigBlindGiven never got set, and this function recursed forever
+          // between here and the block below -- crashing the whole server
+          // with a stack overflow the moment a real 2-player hand started.
+          this.current_player_turn = current_player_turn;
           this.playerCheck(this.players[current_player_turn].playerId, this.players[current_player_turn].socketKey);
-          this.bettingRound(current_player_turn + 1);
+          this.bettingRound(current_player_turn + 1, recursionDepth);
 
         } else {
           if (!this.players[current_player_turn].isFold && !this.players[current_player_turn].isAllIn) {
@@ -695,15 +718,15 @@ Room.prototype.bettingRound = function (current_player_turn) {
             this.bettingRoundTimer(current_player_turn);
           } else {
             this.current_player_turn = this.current_player_turn + 1;
-            this.bettingRound(this.current_player_turn);
+            this.bettingRound(this.current_player_turn, recursionDepth);
           }
         }
       } else {
         if (this.isCallSituation && verifyBets !== -1) {
-          this.bettingRound(verifyBets);
+          this.bettingRound(verifyBets, recursionDepth);
         } else {
           this.current_player_turn = this.current_player_turn + 1;
-          this.bettingRound(this.current_player_turn);
+          this.bettingRound(this.current_player_turn, recursionDepth);
         }
       }
 
