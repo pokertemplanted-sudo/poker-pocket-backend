@@ -91,6 +91,26 @@ function startWebSocket() {
         logger.log(errObj);
       });
     }).listen(config.server.port);
+
+    // Real (network) client connections were getting dropped by Railway's edge
+    // proxy after a short idle period (bots never hit this, they talk to the
+    // server in-process). A periodic ping keeps every connection visibly alive
+    // to any proxy/load balancer in between, well under any reasonable idle
+    // timeout, so a real player's connection survives quiet moments (waiting
+    // for other players to act, between hands, etc.) instead of silently dying.
+    setInterval(function () {
+      for (let i = 0; i < players.length; i++) {
+        if (players[i] != null && players[i].connection != null && !players[i].isBot) {
+          try {
+            players[i].connection.sendPing();
+          } catch (e) {
+            logger.log('Ping failed for connectionId ' + i + ', treating as disconnected');
+            playerConnectionSetNull(i);
+          }
+        }
+      }
+    }, 20 * 1000);
+
     resolve();
   });
 }
