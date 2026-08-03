@@ -131,6 +131,7 @@ Room.prototype.triggerNewGame = function () {
 Room.prototype.appendPlayers = function () {
   let _this = this;
   this.cleanSpectators();
+  this.evictBotsForHumans();
   if (!this.gameStarted) {
     this.playersTemp = [];
     for (let i = 0; i < this.players.length; i++) {
@@ -1325,7 +1326,9 @@ Room.prototype.botActionHandler = function (current_player_turn) {
 
 
 Room.prototype.removeBotFromRoom = function (current_player_turn) {
-  this.eventEmitter.emit('needNewBot', this.roomId);
+  if (this.getRoomHumanCount() === 0) {
+    this.eventEmitter.emit('needNewBot', this.roomId);
+  }
   this.players[current_player_turn].connection = null;
 };
 
@@ -1340,6 +1343,46 @@ Room.prototype.getRoomBotCount = function () {
     }
   }
   return c;
+};
+
+
+// Returns count of real (non-bot, connected) human players in this room,
+// counting both seated players and players waiting to be appended.
+Room.prototype.getRoomHumanCount = function () {
+  let c = 0;
+  for (let i = 0; i < this.players.length; i++) {
+    if (this.players[i] !== null && !this.players[i].isBot && this.players[i].connection !== null) {
+      c++;
+    }
+  }
+  for (let i = 0; i < this.playersToAppend.length; i++) {
+    if (this.playersToAppend[i] !== null && !this.playersToAppend[i].isBot && this.playersToAppend[i].connection !== null) {
+      c++;
+    }
+  }
+  return c;
+};
+
+
+// Immediately removes all bots from an in-progress or waiting room.
+// Called as soon as a real human takes a seat, so bots never share a table with a human.
+Room.prototype.evictBotsForHumans = function () {
+  if (this.getRoomHumanCount() === 0) {
+    return;
+  }
+  for (let i = this.players.length - 1; i >= 0; i--) {
+    if (this.players[i] !== null && this.players[i].isBot) {
+      if (this.gameStarted && !this.players[i].isFold) {
+        // Fold the bot out cleanly if a hand is currently running
+        this.playerFold(i);
+      }
+      this.players[i].connection = null; // Mark for removal on next appendPlayers pass
+    }
+  }
+  // Bots that were queued but never seated yet
+  this.playersToAppend = this.playersToAppend.filter(function (p) {
+    return !(p !== null && p.isBot);
+  });
 };
 
 

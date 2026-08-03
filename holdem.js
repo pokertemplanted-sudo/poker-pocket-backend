@@ -452,6 +452,10 @@ function onAppendBot(roomId) {
   if (!rooms[roomId]) {
     return;
   }
+  if (rooms[roomId].getRoomHumanCount() > 0) {
+    // Never seat a bot at a table where a real player is sitting
+    return;
+  }
   if (Number(rooms[roomId].playersToAppend.length + rooms[roomId].players.length) < Number(config.games.holdEm.holdEmGames[rooms[roomId].holdemType].max_seats)) {
     const connectionId = CONNECTION_ID;
     players.push(new player.Player(-1, null, connectionId, config.games.holdEm.bot.startMoney, true));
