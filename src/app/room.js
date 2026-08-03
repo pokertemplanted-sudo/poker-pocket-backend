@@ -863,6 +863,18 @@ Room.prototype.playerCheck = function (connection_id, socketKey) {
 
 Room.prototype.playerRaise = function (connection_id, socketKey, amount) {
   let playerId = this.getPlayerId(connection_id);
+  // SECURITY: reject a malformed/malicious amount before it ever reaches the
+  // betting math below — a negative number, a numeric string (breaks totalBet
+  // via string concatenation on '+'), NaN/null/Infinity, or a fractional chip
+  // amount can otherwise corrupt totalBet/playerMoney or mint chips from thin air.
+  // NOTE: amount === 0 is intentionally still ALLOWED — it's how the real
+  // client (myRaiseHelper() in poker-pocket-web-client) signals "just call",
+  // and the existing logic right below already special-cases it
+  // (`if (amount === 0) { amount = playerBetDifference; }`). A strict
+  // `amount > 0` guard would silently break that legitimate call path.
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || !Number.isInteger(amount) || amount < 0) {
+    return;
+  }
   if (this.players[playerId].connection !== null && this.players[playerId].socketKey === socketKey || this.players[playerId].isBot) {
     if (playerId !== -1 && playerId === this.current_player_turn) {
       let playerBetDifference = (this.currentHighestBet - this.players[playerId].totalBet);
