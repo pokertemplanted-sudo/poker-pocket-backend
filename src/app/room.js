@@ -1428,8 +1428,10 @@ Room.prototype.evictBotsForHumans = function () {
   for (let i = this.players.length - 1; i >= 0; i--) {
     if (this.players[i] !== null && this.players[i].isBot) {
       if (this.gameStarted && !this.players[i].isFold) {
-        // Fold the bot out cleanly if a hand is currently running
-        this.playerFold(i);
+        // Mark the bot folded directly (same mechanism used for disconnected
+        // players elsewhere in the engine) instead of Room.playerFold, which
+        // is gated on it being that player's current turn.
+        this.players[i].setStateFold();
       }
       this.players[i].connection = null; // Mark for removal on next appendPlayers pass
     }

@@ -86,10 +86,8 @@ function makePlayer(playerId, isBot, connected) {
   room.players = [bot1, human];
   room.playersToAppend = [];
   room.gameStarted = true;
-  let foldedIndexes = [];
-  room.playerFold = function (i) { foldedIndexes.push(i); };
   room.evictBotsForHumans();
-  assert(foldedIndexes.length === 1 && foldedIndexes[0] === 0, 'evictBotsForHumans hace fold al bot antes de sacarlo si hay mano en curso');
+  assert(bot1.isFold === true && bot1.playerState === 1, 'evictBotsForHumans marca al bot como foldeado (setStateFold) si hay mano en curso');
   assert(bot1.connection === null, 'evictBotsForHumans desconecta al bot foldeado');
 })();
 
