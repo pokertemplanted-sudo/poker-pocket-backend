@@ -40,28 +40,34 @@ exports = module.exports = {
         {
           name: 'Texas Hold\'em with low bets',
           typeName: 'Low bets',
-          max_seats: 6,
+          max_seats: 7,
           minPlayers: 2,
           turnCountdown: 20,
           minBet: 10,
+          buyInMin: 200,
+          buyInMax: 2000,
           afterRoundCountdown: 10
         },
         {
           name: 'Texas Hold\'em with medium bets',
           typeName: 'Medium bets',
-          max_seats: 6,
+          max_seats: 7,
           minPlayers: 2,
           turnCountdown: 20,
           minBet: 100,
+          buyInMin: 2000,
+          buyInMax: 20000,
           afterRoundCountdown: 10
         },
         {
           name: 'Texas Hold\'em with high bets',
           typeName: 'High bets',
-          max_seats: 6,
+          max_seats: 7,
           minPlayers: 2,
           turnCountdown: 20,
           minBet: 1000,
+          buyInMin: 20000,
+          buyInMax: 200000,
           afterRoundCountdown: 10
         }
       ],

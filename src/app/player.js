@@ -13,6 +13,7 @@ function Player(conn, socketKey, connection_id, player_money, isBot) {
   this.playerId = connection_id; // Connection id
   this.playerDatabaseId = -1; // Use this to detect logged in player
   this.selectedRoomId = -1;
+  this.seatIndex = -1; // Fixed seat number at the table (0-6), -1 = not seated
   this.playerName = null;
   this.playerMoney = player_money;
   this.playerWinCount = 0;

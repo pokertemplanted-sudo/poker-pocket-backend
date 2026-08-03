@@ -48,6 +48,8 @@ function Room(holdemType, number, eventEmitter, sequelizeObjects) {
   this.roomMinBet = config.games.holdEm.holdEmGames[holdemType].minBet;
   this.roomName = 'Room ' + number;
   this.maxSeats = config.games.holdEm.holdEmGames[holdemType].max_seats;
+  this.buyInMin = config.games.holdEm.holdEmGames[holdemType].buyInMin;
+  this.buyInMax = config.games.holdEm.holdEmGames[holdemType].buyInMax;
   this.minPlayers = config.games.holdEm.holdEmGames[holdemType].minPlayers;
   this.turnTimeOut = config.games.holdEm.holdEmGames[holdemType].turnCountdown * 1000;
   this.currentStage = Room.HOLDEM_STAGE_ONE_HOLE_CARDS;
@@ -118,8 +120,59 @@ Room.prototype.getRoomInfo = function () {
     roomName: this.roomName,
     roomMinBet: this.roomMinBet,
     playerCount: (this.players.length + this.playersToAppend.length + this.bots.length),
-    maxSeats: this.maxSeats
+    maxSeats: this.maxSeats,
+    buyInMin: this.buyInMin,
+    buyInMax: this.buyInMax,
+    freeSeats: this.getFreeSeatIndexes()
   };
+};
+
+
+// Returns the list of seat numbers (0..maxSeats-1) currently NOT occupied
+// by a connected player (human or bot) or a player waiting to be appended.
+Room.prototype.getFreeSeatIndexes = function () {
+  let taken = {};
+  for (let i = 0; i < this.players.length; i++) {
+    if (this.players[i] !== null && this.players[i].connection !== null && this.players[i].seatIndex >= 0) {
+      taken[this.players[i].seatIndex] = true;
+    }
+  }
+  for (let i = 0; i < this.playersToAppend.length; i++) {
+    if (this.playersToAppend[i] !== null && this.playersToAppend[i].seatIndex >= 0) {
+      taken[this.playersToAppend[i].seatIndex] = true;
+    }
+  }
+  let free = [];
+  for (let s = 0; s < this.maxSeats; s++) {
+    if (!taken[s]) {
+      free.push(s);
+    }
+  }
+  return free;
+};
+
+
+/**
+ * A human player picks a specific seat number and how many chips to bring (buy-in).
+ * Returns {result: true} on success, or {result: false, reason: '...'} if it can't be done.
+ */
+Room.prototype.playerSelectSeat = function (playerObj, seatIndex, buyIn) {
+  seatIndex = Number(seatIndex);
+  buyIn = Number(buyIn);
+  if (!Number.isInteger(seatIndex) || seatIndex < 0 || seatIndex >= this.maxSeats) {
+    return {result: false, reason: 'Invalid seat number'};
+  }
+  if (this.getFreeSeatIndexes().indexOf(seatIndex) === -1) {
+    return {result: false, reason: 'Seat already taken'};
+  }
+  if (!Number.isFinite(buyIn) || buyIn < this.buyInMin || buyIn > this.buyInMax) {
+    return {result: false, reason: 'Buy-in must be between ' + this.buyInMin + ' and ' + this.buyInMax};
+  }
+  playerObj.seatIndex = seatIndex;
+  playerObj.playerMoney = buyIn;
+  this.playersToAppend.push(playerObj);
+  this.triggerNewGame();
+  return {result: true};
 };
 
 
@@ -919,6 +972,7 @@ Room.prototype.getRoomParams = function () {
   response.data.gameStarted = !!(this.currentStage >= Room.HOLDEM_STAGE_ONE_HOLE_CARDS && this.holeCardsGiven);
   response.data.playerCount = this.players.length;
   response.data.roomMinBet = this.roomMinBet;
+  response.data.maxSeats = this.maxSeats;
   response.data.middleCards = this.middleCards;
   response.data.playersData = [];
   for (let i = 0; i < this.players.length; i++) {
@@ -927,6 +981,7 @@ Room.prototype.getRoomParams = function () {
     playerData.playerName = this.players[i].playerName;
     playerData.playerMoney = this.players[i].playerMoney;
     playerData.isDealer = this.players[i].isDealer;
+    playerData.seatIndex = this.players[i].seatIndex;
     response.data.playersData[i] = playerData;
   }
   return response;

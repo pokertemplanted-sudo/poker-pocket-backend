@@ -111,6 +111,9 @@ function messageHandler(input) {
       onPlayerSelectRoom(input.connectionId, input.socketKey, input.roomId);
       getRoomParameters(input.connectionId, input.socketKey, input.roomId);
       break;
+    case "selectSeat":
+      onPlayerSelectSeat(input.connectionId, input.socketKey, input.roomId, input.seatIndex, input.buyIn);
+      break;
     case "getRoomParams":
       getRoomParameters(input.connectionId, input.socketKey, input.roomId);
       break;
@@ -238,7 +241,7 @@ function onRequestSpectateRooms(connectionId, socketKey, roomId) {
 }
 
 
-// Player selected room to play in
+// Player selected room to play in (legacy: server auto-assigns money/seat)
 function onPlayerSelectRoom(connectionId, socketKey, roomId) {
   if (isValidInput({connectionId, socketKey, roomId}, true)) {
     if ((rooms[roomId].players.length + rooms[roomId].playersToAppend.length) < config.games.holdEm.holdEmGames[rooms[roomId].holdemType].max_seats) {
@@ -247,6 +250,27 @@ function onPlayerSelectRoom(connectionId, socketKey, roomId) {
       rooms[roomId].playersToAppend.push(players[connectionId]);
       logger.log(players[connectionId].playerName + " selected room " + roomId);
       rooms[roomId].triggerNewGame();
+    }
+  }
+}
+
+
+// Player picked a specific seat number and a buy-in amount (chips brought to the table)
+function onPlayerSelectSeat(connectionId, socketKey, roomId, seatIndex, buyIn) {
+  if (isValidInput({connectionId, socketKey, roomId}, true)) {
+    const result = rooms[roomId].playerSelectSeat(players[connectionId], seatIndex, buyIn);
+    if (result.result) {
+      players[connectionId].connection.selectedRoomId = roomId;
+      players[connectionId].selectedRoomId = roomId;
+      logger.log(players[connectionId].playerName + " selected seat " + seatIndex + " in room " + roomId + " with buy-in " + buyIn);
+    }
+    responseArray.key = "selectSeatResult";
+    responseArray.code = result.result ? 200 : 400;
+    responseArray.data = result;
+    players[connectionId].connection.sendText(JSON.stringify(responseArray));
+    cleanResponseArray();
+    if (result.result) {
+      players[connectionId].connection.sendText(JSON.stringify(rooms[roomId].getRoomParams()));
     }
   }
 }
@@ -471,6 +495,8 @@ function onAppendBot(roomId) {
     } else {
       players[connectionId].playerName = "Bot" + Math.floor(Math.random() * 1000);
     }
+    const freeSeats = rooms[roomId].getFreeSeatIndexes();
+    players[connectionId].seatIndex = freeSeats.length > 0 ? freeSeats[0] : -1;
     rooms[roomId].playersToAppend.push(players[connectionId]);
     // logger.log("BOT " + players[connectionId].playerName + " selected room " + roomId);
     rooms[roomId].triggerNewGame();
