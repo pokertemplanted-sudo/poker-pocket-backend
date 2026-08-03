@@ -226,6 +226,8 @@ Room.prototype.appendPlayers = function () {
         }, config.common.startGameTimeOut);
       } else {
         logger.log('* Room ' + this.roomName + ' has not enough players');
+        this.currentStatusText = 'Waiting for ' + (this.minPlayers - this.players.length) + ' more player(s) to start...';
+        this.sendStatusUpdate();
       }
     } else {
       if (this.players.length >= this.minPlayers) {
@@ -235,7 +237,10 @@ Room.prototype.appendPlayers = function () {
           _this.startGame();
         }, config.common.startGameTimeOut);
       } else {
-        this.currentStatusText = this.minPlayers + ' players needed to start a new game...';
+        this.currentStatusText = this.players.length === 0
+          ? 'Waiting players...'
+          : 'Waiting for ' + (this.minPlayers - this.players.length) + ' more player(s) to start...';
+        this.sendStatusUpdate();
       }
     }
   } else {
