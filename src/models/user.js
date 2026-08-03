@@ -11,7 +11,7 @@ module.exports = (sequelize, type) => {
       primaryKey: true,
       autoIncrement: true
     },
-    name: type.STRING,
+    name: {type: type.STRING, unique: true},
     xp: {type: type.INTEGER, defaultValue: 0},
     money: {type: type.NUMERIC, defaultValue: 0},
     win_count: {type: type.INTEGER, defaultValue: 0},

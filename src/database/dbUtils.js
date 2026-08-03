@@ -3,6 +3,8 @@
 // Imports
 const Sequelize = require('sequelize');
 const Op = Sequelize.Op;
+const bcrypt = require('bcryptjs');
+const BCRYPT_SALT_ROUNDS = 10;
 
 
 /**
@@ -23,15 +25,28 @@ function CreateAccountPromise(sequelizeObjects, username, password, email) {
       if (userObj.length > 0) {
         resolve({result: false});
       } else {
-        sequelizeObjects.User.create(
-          {
-            name: username,
-            password: password,
-            email: email,
-            money: 10000,
-          }
-        ).then(() => {
-          resolve({result: true});
+        bcrypt.hash(password, BCRYPT_SALT_ROUNDS).then(hashedPassword => {
+          sequelizeObjects.User.create(
+            {
+              name: username,
+              password: hashedPassword,
+              email: email,
+              money: 10000,
+            }
+          ).then(() => {
+            resolve({result: true});
+          }).catch(error => {
+            // Race condition guard: two createAccount calls for the same
+            // username can both pass the findAll check above before either
+            // INSERT lands. The DB-level `unique: true` on `name`
+            // (src/models/user.js) is the real guard here; this catches its
+            // violation instead of leaving an unhandled rejection.
+            if (error.name === 'SequelizeUniqueConstraintError') {
+              reject({result: false, message: 'Username already exists'});
+            } else {
+              reject({result: false, message: 'Could not create account'});
+            }
+          });
         });
       }
     });
@@ -53,12 +68,38 @@ function LoginPromise(sequelizeObjects, username, password) {
   return new Promise(function (resolve, reject) {
     sequelizeObjects.User.findAll({
       limit: 1,
-      where: {name: username, password: password},
+      where: {name: username},
     }).then(users => {
-      if (users.length > 0) {
-        resolve({result: true, username: users[0].name, password: users[0].password});
-      } else {
+      if (users.length === 0) {
         resolve({result: false, username: null, password: null});
+        return;
+      }
+      const user = users[0];
+      const storedPassword = user.password;
+      const isBcryptHash = typeof storedPassword === 'string' && storedPassword.startsWith('$2');
+
+      if (isBcryptHash) {
+        bcrypt.compare(password, storedPassword).then(matches => {
+          if (matches) {
+            resolve({result: true, username: user.name, password: user.password});
+          } else {
+            resolve({result: false, username: null, password: null});
+          }
+        });
+      } else {
+        // Legacy plaintext account (created before this migration).
+        if (password === storedPassword) {
+          // Silent migration: rehash and persist now that we have the
+          // plaintext in hand, so the NEXT login for this user takes the
+          // bcrypt branch above instead.
+          bcrypt.hash(password, BCRYPT_SALT_ROUNDS).then(hashedPassword => {
+            user.update({password: hashedPassword}).then(() => {
+              resolve({result: true, username: user.name, password: hashedPassword});
+            });
+          });
+        } else {
+          resolve({result: false, username: null, password: null});
+        }
       }
     });
   });
