@@ -93,3 +93,40 @@ test('LoginPromise — migra en silencio una cuenta legacy en texto plano al pri
   const secondLogin = await dbUtils.LoginPromise(sequelizeObjects, username, plainPassword);
   assert.strictEqual(secondLogin.result, true, 'el login post-migración debe seguir aceptando la misma contraseña');
 });
+
+test('GetLoggedInUserParametersPromise — re-login silencioso funciona contra una cuenta ya migrada a bcrypt', async () => {
+  const username = uniqueUsername('relogin');
+  const plainPassword = 'PasswordDeReconexion789';
+
+  // Cuenta creada por el flujo normal (ya queda en bcrypt) — es exactamente
+  // el caso que antes rompía: la comparación vieja hacía
+  // WHERE name=... AND password=... contra el hash bcrypt, y el password
+  // en texto plano que manda el cliente nunca puede ser igual a un hash.
+  await dbUtils.CreateAccountPromise(sequelizeObjects, username, plainPassword, `${username}@test.local`);
+
+  const ok = await dbUtils.GetLoggedInUserParametersPromise(sequelizeObjects, username, plainPassword);
+  assert.strictEqual(ok.result, true, 'el re-login silencioso debe aceptar la contraseña correcta contra una cuenta bcrypt');
+  assert.strictEqual(ok.name, username);
+  assert.strictEqual(typeof ok.id, 'number');
+
+  const bad = await dbUtils.GetLoggedInUserParametersPromise(sequelizeObjects, username, 'contraseña incorrecta');
+  assert.strictEqual(bad.result, false, 'el re-login silencioso debe rechazar una contraseña incorrecta');
+});
+
+test('GetLoggedInUserParametersPromise — también migra en silencio una cuenta legacy en texto plano', async () => {
+  const username = uniqueUsername('relogin_legacy');
+  const plainPassword = 'ReloginLegacyPass000';
+
+  await sequelizeObjects.User.create({
+    name: username,
+    password: plainPassword,
+    email: `${username}@test.local`,
+    money: 5000,
+  });
+
+  const result = await dbUtils.GetLoggedInUserParametersPromise(sequelizeObjects, username, plainPassword);
+  assert.strictEqual(result.result, true, 'debe aceptar la cuenta legacy en texto plano en el primer re-login');
+
+  const rows = await sequelizeObjects.User.findAll({where: {name: username}});
+  assert.match(rows[0].password, /^\$2[aby]?\$/, 'después del re-login, la cuenta legacy debe quedar migrada a bcrypt');
+});

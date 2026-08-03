@@ -7,6 +7,7 @@ dotEnv.config();
 // Models
 const UserModel = require('../models/user');
 const StatisticModel = require('../models/statistic');
+const SessionModel = require('../models/session');
 
 
 // Sequelize instance
@@ -30,10 +31,13 @@ const sequelize = new Sequelize(process.env.DB_DATABASE, process.env.DB_USER, pr
 // Initialize models
 const User = UserModel(sequelize, Sequelize);
 const Statistic = StatisticModel(sequelize, Sequelize);
+const Session = SessionModel(sequelize, Sequelize);
 
 
 // Define relations
 User.hasMany(Statistic);
+User.hasMany(Session);
+Session.belongsTo(User);
 
 
 // Sync with database
@@ -46,4 +50,5 @@ sequelize.sync(/*{force: true}*/) // Do not use force, will drop table
 module.exports = {
   User,
   Statistic,
+  Session,
 };

@@ -118,21 +118,51 @@ exports.LoginPromise = LoginPromise;
  */
 function GetLoggedInUserParametersPromise(sequelizeObjects, username, password) {
   return new Promise(function (resolve, reject) {
+    const noMatch = {result: false, id: null, name: null, money: null, win_count: null, lose_count: null};
+    const toUserParams = (user) => ({
+      result: true,
+      id: user.id,
+      name: user.name,
+      money: user.money,
+      win_count: user.win_count,
+      lose_count: user.lose_count
+    });
+
+    // SECURITY: mirrors LoginPromise's bcrypt/legacy-plaintext branching.
+    // The old version did a single WHERE name=... AND password=... lookup,
+    // which only ever matched a plaintext-stored password. Once LoginPromise
+    // migrates an account to bcrypt, that exact-match lookup can never
+    // succeed again (a plaintext password will never equal a bcrypt hash),
+    // silently breaking the "remember me" reconnect for every migrated user.
     sequelizeObjects.User.findAll({
       limit: 1,
-      where: {name: username, password: password},
+      where: {name: username},
     }).then(users => {
-      if (users.length > 0) {
-        resolve({
-          result: true,
-          id: users[0].id,
-          name: users[0].name,
-          money: users[0].money,
-          win_count: users[0].win_count,
-          lose_count: users[0].lose_count
+      if (users.length === 0) {
+        resolve(noMatch);
+        return;
+      }
+      const user = users[0];
+      const storedPassword = user.password;
+      const isBcryptHash = typeof storedPassword === 'string' && storedPassword.startsWith('$2');
+
+      if (isBcryptHash) {
+        bcrypt.compare(password, storedPassword).then(matches => {
+          resolve(matches ? toUserParams(user) : noMatch);
         });
       } else {
-        resolve({result: false, id: null, name: null, money: null, win_count: null, lose_count: null});
+        // Legacy plaintext account: same silent-migration behavior as
+        // LoginPromise, so a "remember me" reconnect also upgrades the
+        // stored hash instead of requiring the user to log in by hand first.
+        if (password === storedPassword) {
+          bcrypt.hash(password, BCRYPT_SALT_ROUNDS).then(hashedPassword => {
+            user.update({password: hashedPassword}).then(() => {
+              resolve(toUserParams(user));
+            });
+          });
+        } else {
+          resolve(noMatch);
+        }
       }
     });
   });
