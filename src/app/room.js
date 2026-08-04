@@ -665,6 +665,13 @@ Room.prototype.bettingRound = function (current_player_turn, recursionDepth) {
         } else {
           //this.bettingRound(noRoundPlayedPlayer);
           // --- going into testing ---
+          // Mismo bug que el de las ciegas forzadas (ver comentario más abajo):
+          // sin sincronizar this.current_player_turn acá, playerCheck()
+          // rechaza en silencio la acción de este jugador (el guard
+          // `playerId === this.current_player_turn` nunca matchea), su
+          // apuesta nunca se aplica de verdad, y la ronda solo "avanza"
+          // por el timeout -- sin que nadie haya actuado realmente.
+          this.current_player_turn = noRoundPlayedPlayer;
           this.players[noRoundPlayedPlayer].isPlayerTurn = true;
           this.players[noRoundPlayedPlayer].playerTimeLeft = this.turnTimeOut;
           this.currentTurnText = '' + this.players[noRoundPlayedPlayer].playerName + ' Turn';
@@ -706,6 +713,18 @@ Room.prototype.bettingRound = function (current_player_turn, recursionDepth) {
             if (verifyBets !== -1 || !this.smallBlindGiven || !this.bigBlindGiven) {
               this.isCallSituation = true;
             }
+            // BUG PRINCIPAL (causa del "se queda pegado en preflop, nunca
+            // reparte cartas"): esta es la rama que le da el turno real a
+            // cada jugador (bot o humano) en la operación normal de la
+            // mesa. Nunca sincronizaba this.current_player_turn con el
+            // parámetro local -- así que cuando el bot (o el jugador)
+            // mandaba su acción, playerCheck/playerFold/playerRaise
+            // rechazaban todo en silencio (`playerId === this.current_player_turn`
+            // nunca era true), nadie apostaba de verdad, y la ronda solo
+            // "avanzaba" cada ~turnTimeOut segundos por el timeout de
+            // bettingRoundTimer -- por eso el mismo grupo de bots repetía
+            // el mismo cA para siempre y el flop nunca se repartía.
+            this.current_player_turn = current_player_turn;
             // player's turn
             this.players[current_player_turn].isPlayerTurn = true;
             this.players[current_player_turn].playerTimeLeft = this.turnTimeOut;
