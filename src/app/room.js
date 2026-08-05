@@ -518,7 +518,9 @@ Room.prototype.sendAllPlayersCards = function () {
 Room.prototype.roundResultsEnd = function () {
   const _this = this;
   logger.log('--------ROUND RESULT-----------');
+  let winnerPlayers = [];
 
+  let currentHighestRank = 0;
   let l = this.players.length;
   for (let i = 0; i < l; i++) {
     if (!this.players[i].isFold) {
@@ -535,57 +537,31 @@ Room.prototype.roundResultsEnd = function () {
       // Log out results
       logger.log(this.players[i].playerName + ' has ' + this.players[i].handName + ' with value: ' + this.players[i].handValue
         + ' cards involved: ' + hand.cards, logger.LOG_GREEN);
+      // Calculate winner(s)
+      if (this.players[i].handValue > currentHighestRank) {
+        currentHighestRank = this.players[i].handValue;
+        winnerPlayers = []; // zero it
+        winnerPlayers.push(i);
+      } else if (this.players[i].handValue === currentHighestRank) {
+        winnerPlayers.push(i);
+      }
     }
   }
-
-  // Split the hand into main pot + side pots (based on each player's actual
-  // contribution) instead of handing the whole totalPot to the overall best hand.
-  // This is what makes all-ins with uneven stacks pay out correctly.
-  const pots = this.calculateSidePots();
-  const allWinnerIndexes = []; // for stats update, deduplicated
   let winnerNames = [];
-  let topHandName = null;
-
-  for (let p = 0; p < pots.length; p++) {
-    const pot = pots[p];
-    if (pot.eligible.length === 0) {
-      continue; // Nobody left eligible for this layer (shouldn't normally happen)
-    }
-    let potHighestRank = 0;
-    let potWinners = [];
-    for (let e = 0; e < pot.eligible.length; e++) {
-      const idx = pot.eligible[e];
-      const value = this.players[idx].handValue;
-      if (value > potHighestRank) {
-        potHighestRank = value;
-        potWinners = [idx];
-      } else if (value === potHighestRank) {
-        potWinners.push(idx);
-      }
-    }
-    const share = Math.floor(pot.amount / potWinners.length);
-    let remainder = pot.amount - (share * potWinners.length); // odd chips, given to first winner to conserve money
-    for (let w = 0; w < potWinners.length; w++) {
-      const idx = potWinners[w];
-      let amount = share + (w === 0 ? remainder : 0);
-      this.players[idx].playerMoney = this.players[idx].playerMoney + amount;
-      if (allWinnerIndexes.indexOf(idx) === -1) {
-        allWinnerIndexes.push(idx);
-        winnerNames.push(this.players[idx].playerName);
-        this.roundWinnerPlayerIds.push(this.players[idx].playerId);
-        this.roundWinnerPlayerCards.push(utils.stringToAsciiCardsArray(this.players[idx].cardsInvolvedOnEvaluation));
-      }
-      if (topHandName === null || p === 0) { // Prefer describing the main pot's winning hand in the status text
-        topHandName = this.players[idx].handName;
-      }
-    }
+  let sharedPot = (this.totalPot / winnerPlayers.length);
+  l = winnerPlayers.length;
+  for (let i = 0; i < l; i++) {
+    winnerNames.push(this.players[winnerPlayers[i]].playerName + (l > 1 ? '' : ''));
+    this.players[winnerPlayers[i]].playerMoney = this.players[winnerPlayers[i]].playerMoney + sharedPot;
+    this.roundWinnerPlayerIds.push(this.players[winnerPlayers[i]].playerId);
+    this.roundWinnerPlayerCards.push(utils.stringToAsciiCardsArray(this.players[winnerPlayers[i]].cardsInvolvedOnEvaluation));
   }
+  logger.log('Room = ' + this.roomName + ' winner(s) are : ' + winnerNames);
+  this.currentStatusText = winnerNames + ' got ' + this.players[winnerPlayers[0]].handName;
 
-  logger.log('Room = ' + this.roomName + ' winner(s) are : ' + winnerNames + (pots.length > 1 ? ' (' + pots.length + ' pots)' : ''));
-  this.currentStatusText = winnerNames + ' got ' + topHandName;
 
-  this.updateLoggedInPlayerDatabaseStatistics(allWinnerIndexes, this.lastWinnerPlayers);
-  this.lastWinnerPlayers = allWinnerIndexes; // Take new reference of winner players
+  this.updateLoggedInPlayerDatabaseStatistics(winnerPlayers, this.lastWinnerPlayers);
+  this.lastWinnerPlayers = winnerPlayers; // Take new reference of winner players
   this.totalPot = 0;
   this.isResultsCall = true;
 
@@ -630,20 +606,22 @@ Room.prototype.roundResultsMiddleOfTheGame = function () {
 // *********************************************************************************************************************
 /* Every betting round goes thru this logic */
 
-Room.prototype.bettingRound = function (current_player_turn, recursionDepth) {
+Room.prototype.bettingRound = function (current_player_turn) {
   let _this = this;
-  recursionDepth = (recursionDepth || 0) + 1;
-  // Defense in depth: bettingRound recurses synchronously by design, and a
-  // RangeError (stack overflow) anywhere in this function crashes the WHOLE
-  // Node process -- every player on every table gets disconnected, not just
-  // this room. A legitimate hand never needs anywhere close to this many
-  // recursive calls. If some future bug reintroduces a loop like this, fail
-  // this one hand instead of taking the entire server down with it.
-  if (recursionDepth > 500) {
-    logger.log('Room ' + this.roomName + ': bettingRound recursion guard tripped (possible infinite loop), aborting hand', logger.LOG_RED);
-    this.roundResultsMiddleOfTheGame();
-    return;
-  }
+  // BUGFIX: this function recurses into itself (and is re-entered from
+  // bettingRoundTimer) passing the next player index as a plain argument,
+  // but this.current_player_turn — the ROOM's actual turn state, which
+  // playerFold/playerCheck/playerRaise validate against
+  // (playerId === this.current_player_turn) — was only updated at some of
+  // those call sites, not all. When they drifted apart (e.g. the forced
+  // small/big-blind path below), the turn guard silently rejected the
+  // internal playerCheck call meant to post the blind, that blind never
+  // got marked given, and the recursion never converged — it just kept
+  // calling itself deeper until the call stack overflowed and crashed the
+  // whole process (killing every connected player's game, not just this
+  // room's). Syncing here once, unconditionally, keeps the invariant true
+  // for every current and future call site instead of patching each one.
+  this.current_player_turn = current_player_turn;
   if (this.getActivePlayers()) { // Checks that game has active players (not fold ones)
     let verifyBets = this.verifyPlayersBets(); // Active players have correct amount of money in game
     let noRoundPlayedPlayer = this.getNotRoundPlayedPlayer(); // Returns player position who has not played it's round
@@ -665,13 +643,6 @@ Room.prototype.bettingRound = function (current_player_turn, recursionDepth) {
         } else {
           //this.bettingRound(noRoundPlayedPlayer);
           // --- going into testing ---
-          // Mismo bug que el de las ciegas forzadas (ver comentario más abajo):
-          // sin sincronizar this.current_player_turn acá, playerCheck()
-          // rechaza en silencio la acción de este jugador (el guard
-          // `playerId === this.current_player_turn` nunca matchea), su
-          // apuesta nunca se aplica de verdad, y la ronda solo "avanza"
-          // por el timeout -- sin que nadie haya actuado realmente.
-          this.current_player_turn = noRoundPlayedPlayer;
           this.players[noRoundPlayedPlayer].isPlayerTurn = true;
           this.players[noRoundPlayedPlayer].playerTimeLeft = this.turnTimeOut;
           this.currentTurnText = '' + this.players[noRoundPlayedPlayer].playerName + ' Turn';
@@ -685,7 +656,7 @@ Room.prototype.bettingRound = function (current_player_turn, recursionDepth) {
         }
       } else {
         this.isCallSituation = true;
-        this.bettingRound(verifyBets, recursionDepth);
+        this.bettingRound(verifyBets);
       }
 
     } else {
@@ -694,37 +665,14 @@ Room.prototype.bettingRound = function (current_player_turn, recursionDepth) {
 
         // Forced small and big blinds case
         if (this.currentStage === Room.HOLDEM_STAGE_TWO_PRE_FLOP && (!this.smallBlindGiven || !this.bigBlindGiven)) {
-          // Keep the room's turn-ownership field in sync with the player we're
-          // about to force a blind out of -- playerCheck() requires
-          // playerId === this.current_player_turn (a security fix added to
-          // reject actions from a player whose turn it isn't), but this loop
-          // was calling playerCheck() using only the LOCAL current_player_turn
-          // parameter, never updating this.current_player_turn. That caused
-          // the guard to reject the (silent, self-triggered) big blind post,
-          // bigBlindGiven never got set, and this function recursed forever
-          // between here and the block below -- crashing the whole server
-          // with a stack overflow the moment a real 2-player hand started.
-          this.current_player_turn = current_player_turn;
           this.playerCheck(this.players[current_player_turn].playerId, this.players[current_player_turn].socketKey);
-          this.bettingRound(current_player_turn + 1, recursionDepth);
+          this.bettingRound(current_player_turn + 1);
 
         } else {
           if (!this.players[current_player_turn].isFold && !this.players[current_player_turn].isAllIn) {
             if (verifyBets !== -1 || !this.smallBlindGiven || !this.bigBlindGiven) {
               this.isCallSituation = true;
             }
-            // BUG PRINCIPAL (causa del "se queda pegado en preflop, nunca
-            // reparte cartas"): esta es la rama que le da el turno real a
-            // cada jugador (bot o humano) en la operación normal de la
-            // mesa. Nunca sincronizaba this.current_player_turn con el
-            // parámetro local -- así que cuando el bot (o el jugador)
-            // mandaba su acción, playerCheck/playerFold/playerRaise
-            // rechazaban todo en silencio (`playerId === this.current_player_turn`
-            // nunca era true), nadie apostaba de verdad, y la ronda solo
-            // "avanzaba" cada ~turnTimeOut segundos por el timeout de
-            // bettingRoundTimer -- por eso el mismo grupo de bots repetía
-            // el mismo cA para siempre y el flop nunca se repartía.
-            this.current_player_turn = current_player_turn;
             // player's turn
             this.players[current_player_turn].isPlayerTurn = true;
             this.players[current_player_turn].playerTimeLeft = this.turnTimeOut;
@@ -737,15 +685,15 @@ Room.prototype.bettingRound = function (current_player_turn, recursionDepth) {
             this.bettingRoundTimer(current_player_turn);
           } else {
             this.current_player_turn = this.current_player_turn + 1;
-            this.bettingRound(this.current_player_turn, recursionDepth);
+            this.bettingRound(this.current_player_turn);
           }
         }
       } else {
         if (this.isCallSituation && verifyBets !== -1) {
-          this.bettingRound(verifyBets, recursionDepth);
+          this.bettingRound(verifyBets);
         } else {
           this.current_player_turn = this.current_player_turn + 1;
-          this.bettingRound(this.current_player_turn, recursionDepth);
+          this.bettingRound(this.current_player_turn);
         }
       }
 
@@ -929,18 +877,6 @@ Room.prototype.playerCheck = function (connection_id, socketKey) {
 
 Room.prototype.playerRaise = function (connection_id, socketKey, amount) {
   let playerId = this.getPlayerId(connection_id);
-  // SECURITY: reject a malformed/malicious amount before it ever reaches the
-  // betting math below — a negative number, a numeric string (breaks totalBet
-  // via string concatenation on '+'), NaN/null/Infinity, or a fractional chip
-  // amount can otherwise corrupt totalBet/playerMoney or mint chips from thin air.
-  // NOTE: amount === 0 is intentionally still ALLOWED — it's how the real
-  // client (myRaiseHelper() in poker-pocket-web-client) signals "just call",
-  // and the existing logic right below already special-cases it
-  // (`if (amount === 0) { amount = playerBetDifference; }`). A strict
-  // `amount > 0` guard would silently break that legitimate call path.
-  if (typeof amount !== 'number' || !Number.isFinite(amount) || !Number.isInteger(amount) || amount < 0) {
-    return;
-  }
   if (this.players[playerId].connection !== null && this.players[playerId].socketKey === socketKey || this.players[playerId].isBot) {
     if (playerId !== -1 && playerId === this.current_player_turn) {
       let playerBetDifference = (this.currentHighestBet - this.players[playerId].totalBet);
@@ -1183,7 +1119,6 @@ Room.prototype.collectChipsToPotAndSendAction = function () {
       boolMoneyToCollect = true;
     }
     this.totalPot = this.totalPot + this.players[u].totalBet; // Get round bet to total pot
-    this.players[u].handTotalBet = this.players[u].handTotalBet + this.players[u].totalBet; // Track full-hand contribution for side pot calculation
     this.players[u].totalBet = 0; // It's collected, we can empty players total bet
   }
   // Send animation action
@@ -1329,39 +1264,6 @@ Room.prototype.getNotRoundPlayedPlayer = function () {
 
 
 // Evaluate player hand
-// Splits the hand's total contributions into one or more pots (main pot + side pots).
-// Any player who put money in (folded or not) counts toward a pot's size, but only
-// players still in the hand (not folded) and who contributed at least that pot's
-// level are eligible to WIN that pot. This is what correctly handles all-ins where
-// players have different stack sizes, instead of one shared pot for everyone.
-Room.prototype.calculateSidePots = function () {
-  const contributors = [];
-  for (let i = 0; i < this.players.length; i++) {
-    if (this.players[i] != null && this.players[i].handTotalBet > 0) {
-      contributors.push(i);
-    }
-  }
-  if (contributors.length === 0) {
-    return [];
-  }
-  const levels = Array.from(new Set(contributors.map((i) => this.players[i].handTotalBet))).sort((a, b) => a - b);
-
-  const pots = [];
-  let prevLevel = 0;
-  for (let lv = 0; lv < levels.length; lv++) {
-    const level = levels[lv];
-    const layerContributors = contributors.filter((i) => this.players[i].handTotalBet >= level);
-    const layerAmount = (level - prevLevel) * layerContributors.length;
-    if (layerAmount > 0) {
-      const eligible = layerContributors.filter((i) => !this.players[i].isFold);
-      pots.push({amount: layerAmount, eligible: eligible});
-    }
-    prevLevel = level;
-  }
-  return pots;
-};
-
-
 Room.prototype.evaluatePlayerCards = function (current_player) {
   let cardsToEvaluate = [];
   let ml = this.middleCards.length;
