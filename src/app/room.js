@@ -691,12 +691,6 @@ Room.prototype.bettingRound = function (current_player_turn, recursionDepth) {
     let verifyBets = this.verifyPlayersBets(); // Active players have correct amount of money in game
     let noRoundPlayedPlayer = this.getNotRoundPlayedPlayer(); // Returns player position who has not played it's round
     if (current_player_turn >= this.players.length || this.isCallSituation && verifyBets === -1 || verifyBets === -1 && noRoundPlayedPlayer === -1) {
-      logger.log('DIAG completionCheck room=' + this.roomName + ' cpt=' + current_player_turn + ' verifyBets=' + verifyBets +
-        ' noRoundPlayedPlayer=' + noRoundPlayedPlayer + ' isCallSituation=' + this.isCallSituation +
-        ' smallBlindGiven=' + this.smallBlindGiven + ' currentStage=' + this.currentStage +
-        ' roundPlayed=[' + this.players.map(p => p.roundPlayed).join(',') + ']' +
-        ' isFold=[' + this.players.map(p => p.isFold).join(',') + ']' +
-        ' totalBet=[' + this.players.map(p => p.totalBet).join(',') + ']', logger.LOG_RED);
       this.resetPlayerStates();
       if (verifyBets === -1 && this.smallBlindGiven) {
         if (noRoundPlayedPlayer === -1) {
@@ -714,6 +708,17 @@ Room.prototype.bettingRound = function (current_player_turn, recursionDepth) {
         } else {
           //this.bettingRound(noRoundPlayedPlayer);
           // --- going into testing ---
+          // CRITICAL: this branch hands the turn to noRoundPlayedPlayer
+          // WITHOUT going through bettingRound() (see commented-out call
+          // above), so it never got the this.current_player_turn sync that
+          // fix does everywhere else. playerCheck/playerFold/playerRaise's
+          // turn-ownership guard (playerId === this.current_player_turn)
+          // was silently rejecting this player's every action forever --
+          // confirmed live in production via diagnostic logging (this
+          // exact case: noRoundPlayedPlayer stuck at the same index,
+          // roundPlayed never flipping true, hand values repeating on an
+          // endless loop).
+          this.current_player_turn = noRoundPlayedPlayer;
           this.players[noRoundPlayedPlayer].isPlayerTurn = true;
           this.players[noRoundPlayedPlayer].playerTimeLeft = this.turnTimeOut;
           this.currentTurnText = '' + this.players[noRoundPlayedPlayer].playerName + ' Turn';
