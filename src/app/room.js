@@ -691,6 +691,12 @@ Room.prototype.bettingRound = function (current_player_turn, recursionDepth) {
     let verifyBets = this.verifyPlayersBets(); // Active players have correct amount of money in game
     let noRoundPlayedPlayer = this.getNotRoundPlayedPlayer(); // Returns player position who has not played it's round
     if (current_player_turn >= this.players.length || this.isCallSituation && verifyBets === -1 || verifyBets === -1 && noRoundPlayedPlayer === -1) {
+      logger.log('DIAG completionCheck room=' + this.roomName + ' cpt=' + current_player_turn + ' verifyBets=' + verifyBets +
+        ' noRoundPlayedPlayer=' + noRoundPlayedPlayer + ' isCallSituation=' + this.isCallSituation +
+        ' smallBlindGiven=' + this.smallBlindGiven + ' currentStage=' + this.currentStage +
+        ' roundPlayed=[' + this.players.map(p => p.roundPlayed).join(',') + ']' +
+        ' isFold=[' + this.players.map(p => p.isFold).join(',') + ']' +
+        ' totalBet=[' + this.players.map(p => p.totalBet).join(',') + ']', logger.LOG_RED);
       this.resetPlayerStates();
       if (verifyBets === -1 && this.smallBlindGiven) {
         if (noRoundPlayedPlayer === -1) {
