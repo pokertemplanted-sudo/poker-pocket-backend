@@ -658,8 +658,21 @@ Room.prototype.roundResultsMiddleOfTheGame = function () {
 // *********************************************************************************************************************
 /* Every betting round goes thru this logic */
 
-Room.prototype.bettingRound = function (current_player_turn) {
+Room.prototype.bettingRound = function (current_player_turn, recursionDepth) {
   let _this = this;
+  recursionDepth = (recursionDepth || 0) + 1;
+  // Defense in depth: even with the turn-sync fix below in place, bettingRound
+  // still recurses synchronously by design, and any FUTURE bug of a similar
+  // shape that causes it to loop would crash the ENTIRE Node process again --
+  // every room, every connected player, not just this hand. A legitimate hand
+  // never needs anywhere close to this many recursive calls. Past this depth,
+  // log it and abort just this one hand via roundResultsMiddleOfTheGame()
+  // instead of blowing the stack.
+  if (recursionDepth > 500) {
+    logger.log('Room ' + this.roomName + ': bettingRound recursion guard tripped (possible infinite loop), aborting hand', logger.LOG_RED);
+    this.roundResultsMiddleOfTheGame();
+    return;
+  }
   // BUGFIX: this function recurses into itself (and is re-entered from
   // bettingRoundTimer) passing the next player index as a plain argument,
   // but this.current_player_turn — the ROOM's actual turn state, which
@@ -708,7 +721,7 @@ Room.prototype.bettingRound = function (current_player_turn) {
         }
       } else {
         this.isCallSituation = true;
-        this.bettingRound(verifyBets);
+        this.bettingRound(verifyBets, recursionDepth);
       }
 
     } else {
@@ -718,7 +731,7 @@ Room.prototype.bettingRound = function (current_player_turn) {
         // Forced small and big blinds case
         if (this.currentStage === Room.HOLDEM_STAGE_TWO_PRE_FLOP && (!this.smallBlindGiven || !this.bigBlindGiven)) {
           this.playerCheck(this.players[current_player_turn].playerId, this.players[current_player_turn].socketKey);
-          this.bettingRound(current_player_turn + 1);
+          this.bettingRound(current_player_turn + 1, recursionDepth);
 
         } else {
           if (!this.players[current_player_turn].isFold && !this.players[current_player_turn].isAllIn) {
@@ -737,15 +750,15 @@ Room.prototype.bettingRound = function (current_player_turn) {
             this.bettingRoundTimer(current_player_turn);
           } else {
             this.current_player_turn = this.current_player_turn + 1;
-            this.bettingRound(this.current_player_turn);
+            this.bettingRound(this.current_player_turn, recursionDepth);
           }
         }
       } else {
         if (this.isCallSituation && verifyBets !== -1) {
-          this.bettingRound(verifyBets);
+          this.bettingRound(verifyBets, recursionDepth);
         } else {
           this.current_player_turn = this.current_player_turn + 1;
-          this.bettingRound(this.current_player_turn);
+          this.bettingRound(this.current_player_turn, recursionDepth);
         }
       }
 
