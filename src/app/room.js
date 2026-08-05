@@ -286,7 +286,7 @@ Room.prototype.newGame = function () {
   this.sendStatusUpdate();
   setTimeout(function () {
     _this.staging();
-  }, 500)
+  }, 1000)
 };
 
 Room.prototype.staging = function () {
@@ -406,7 +406,7 @@ Room.prototype.holeCards = function () {
   this.holeCardsGiven = true;
   setTimeout(function () {
     _this.staging();
-  }, 1500);
+  }, 3000);
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -432,7 +432,7 @@ Room.prototype.theFlop = function () {
   }
   setTimeout(function () {
     _this.staging();
-  }, 1500);
+  }, 3000);
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -456,7 +456,7 @@ Room.prototype.theTurn = function () {
   }
   setTimeout(function () {
     _this.staging();
-  }, 1000);
+  }, 2000);
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -480,7 +480,7 @@ Room.prototype.theRiver = function () {
   }
   setTimeout(function () {
     _this.staging();
-  }, 1000);
+  }, 2000);
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -509,7 +509,7 @@ Room.prototype.sendAllPlayersCards = function () {
   }
   setTimeout(function () {
     _this.staging();
-  }, 1500);
+  }, 3000);
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -634,11 +634,11 @@ Room.prototype.bettingRound = function (current_player_turn) {
             setTimeout(function () {
               _this.collectingPot = false;
               _this.staging();
-            }, 1250); // Have some time to collect pot and send action
+            }, 2500); // Have some time to collect pot and send action
           } else {
             setTimeout(function () {
               _this.staging(); // No pot to collect, continue without timing
-            }, 500);
+            }, 1000);
           }
         } else {
           //this.bettingRound(noRoundPlayedPlayer);
