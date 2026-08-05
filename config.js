@@ -9,7 +9,7 @@ exports = module.exports = {
     logging: false,
   },
   common: {
-    startGameTimeOut: 3000,     // 2000 stock
+    startGameTimeOut: 1500,     // was 3000, halved for pacing
     startingRooms: 1,          // Default 4, How many rooms to create at start
     roomZeroBotCount: 5,
     roomOneBotCount: 2,
